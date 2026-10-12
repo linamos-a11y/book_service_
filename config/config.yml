@@ -15,9 +15,6 @@ config_file: GO_CONFIG
     default:
       host: {{ get_env "GENERAL_REDIS_SEARCH_HOST" }}
       port: {{ get_env "GENERAL_REDIS_SEARCH_PORT" }}
-      read_timeout_ms: {{ get_env "MICROSERVICES_GO_SEARCHER_REDIS_READ_TIMEOUT_MS" }}
-      write_timeout_ms: {{ get_env "MICROSERVICES_GO_SEARCHER_REDIS_WRITE_TIMEOUT_MS" }}
-      dynamic_matching_ttl_hours: {{ get_env "MICROSERVICES_GO_SEARCHER_DYNAMIC_MATCHING_CACHE_TTL_HOURS" }}
   elastic:
     default:
       url: http://{{ get_env "GENERAL_ELASTICSEARCH_ES_SEARCH_7_HOST" }}:{{ get_env "GENERAL_ELASTICSEARCH_ES_SEARCH_7_PORT" }}

@@ -2,16 +2,29 @@ package handler
 
 import (
 	"errors"
-	"log"
 	"net/http"
 
-	"github.com/fiverr/book_service_/internal/model"
 	"github.com/fiverr/book_service_/internal/service"
+	"github.com/fiverr/go_platform/core/logging"
 	"github.com/gin-gonic/gin"
 )
 
+// Response is the unified top-level envelope returned by every endpoint.
+type Response struct {
+	Success bool        `json:"success"`
+	Data    interface{} `json:"data"`
+	Error   *ErrorInfo  `json:"error"`
+}
+
+// ErrorInfo carries the human-readable message and mirrored HTTP status code
+// for a failed request.
+type ErrorInfo struct {
+	Text       string `json:"text"`
+	StatusCode int    `json:"status_code"`
+}
+
 func respondSuccess(c *gin.Context, status int, data interface{}) {
-	c.JSON(status, model.Response{
+	c.JSON(status, Response{
 		Success: true,
 		Data:    data,
 		Error:   nil,
@@ -19,10 +32,10 @@ func respondSuccess(c *gin.Context, status int, data interface{}) {
 }
 
 func respondError(c *gin.Context, status int, text string) {
-	c.JSON(status, model.Response{
+	c.JSON(status, Response{
 		Success: false,
 		Data:    nil,
-		Error: &model.ErrorInfo{
+		Error: &ErrorInfo{
 			Text:       text,
 			StatusCode: status,
 		},
@@ -30,8 +43,8 @@ func respondError(c *gin.Context, status int, text string) {
 }
 
 // respondFromError maps a service-layer error to the matching HTTP status
-// and unified error envelope.
-func respondFromError(c *gin.Context, err error) {
+// and unified error envelope. Unexpected errors are logged through logger.
+func respondFromError(c *gin.Context, logger logging.Logger, err error) {
 	var validationErr *service.ValidationError
 	switch {
 	case errors.Is(err, service.ErrNotFound):
@@ -39,27 +52,10 @@ func respondFromError(c *gin.Context, err error) {
 	case errors.As(err, &validationErr):
 		respondError(c, http.StatusBadRequest, validationErr.Text)
 	default:
-		log.Printf("unexpected error handling %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+		logger.WithContext(c.Request.Context()).Error("unexpected error handling request",
+			logging.String("method", c.Request.Method),
+			logging.String("route", c.FullPath()),
+			logging.Error(err))
 		respondError(c, http.StatusInternalServerError, "internal error")
 	}
-}
-
-// requiredField pairs a request field's name (for the error message) with
-// its value.
-type requiredField struct {
-	name  string
-	value string
-}
-
-// requireFields checks that each field is non-empty, in order, responding
-// with a 400 for the first missing one. Returns false if a field was
-// missing (the caller should return immediately in that case).
-func requireFields(c *gin.Context, fields ...requiredField) bool {
-	for _, f := range fields {
-		if f.value == "" {
-			respondError(c, http.StatusBadRequest, f.name+" is required")
-			return false
-		}
-	}
-	return true
 }

@@ -10,17 +10,3 @@ type Book struct {
 	EbookAvailable bool    `json:"ebook_available"`
 	PublishDate    string  `json:"publish_date"`
 }
-
-// Response is the unified top-level envelope returned by every endpoint.
-type Response struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data"`
-	Error   *ErrorInfo  `json:"error"`
-}
-
-// ErrorInfo carries the human-readable message and mirrored HTTP status code
-// for a failed request.
-type ErrorInfo struct {
-	Text       string `json:"text"`
-	StatusCode int    `json:"status_code"`
-}

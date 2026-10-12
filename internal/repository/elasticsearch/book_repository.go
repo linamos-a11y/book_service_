@@ -3,108 +3,95 @@ package elasticsearch
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 
 	"github.com/fiverr/book_service_/internal/model"
+	"github.com/fiverr/book_service_/internal/service"
 	"github.com/olivere/elastic/v7"
 )
 
-// ErrNotFound is returned when a book id does not exist in the index.
-var ErrNotFound = errors.New("book not found")
-
-// SearchParams carries the optional filters accepted by GET /search.
-// At least one field is expected to be set by the caller (enforced by the
-// service layer); the repository applies whichever are non-nil.
-type SearchParams struct {
-	Title      string
-	AuthorName string
-	PriceMin   *float64
-	PriceMax   *float64
-}
-
-// StoreStats holds the aggregated counters returned by GET /store.
-type StoreStats struct {
-	TotalBooks      int64
-	DistinctAuthors int64
-}
+// Field names in the books index mapping.
+const (
+	fieldTitle         = "title"
+	fieldAuthorName    = "author_name"
+	fieldAuthorKeyword = "author_name.keyword"
+	fieldPrice         = "price"
+)
 
 // BookRepository is the only layer that talks to Elasticsearch on behalf of
-// the book resource.
-type BookRepository interface {
-	Create(ctx context.Context, book model.Book) (id string, err error)
-	Update(ctx context.Context, id, title string) error
-	Get(ctx context.Context, id string) (*model.Book, error)
-	Delete(ctx context.Context, id string) error
-	Search(ctx context.Context, params SearchParams) (books []model.Book, total int64, err error)
-	Store(ctx context.Context) (StoreStats, error)
-}
-
-type bookRepository struct {
+// the book resource. It implements service.BookRepository.
+type BookRepository struct {
 	client *elastic.Client
 	index  string
 }
 
 // NewBookRepository builds a BookRepository backed by the given Elasticsearch
 // client and index name.
-func NewBookRepository(client *elastic.Client, index string) BookRepository {
-	return &bookRepository{client: client, index: index}
+func NewBookRepository(client *elastic.Client, index string) *BookRepository {
+	return &BookRepository{client: client, index: index}
 }
 
-func (r *bookRepository) Create(ctx context.Context, book model.Book) (string, error) {
+func (r *BookRepository) Create(ctx context.Context, book model.Book) (string, error) {
 	res, err := r.client.Index().
 		Index(r.index).
 		BodyJson(book).
 		Do(ctx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("index book: %w", err)
 	}
 	return res.Id, nil
 }
 
-func (r *bookRepository) Update(ctx context.Context, id, title string) error {
+func (r *BookRepository) Update(ctx context.Context, id, title string) error {
 	_, err := r.client.Update().
 		Index(r.index).
 		Id(id).
-		Doc(map[string]interface{}{"title": title}).
+		Doc(map[string]interface{}{fieldTitle: title}).
 		Do(ctx)
 	if elastic.IsNotFound(err) {
-		return ErrNotFound
+		return service.ErrNotFound
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("update book: %w", err)
+	}
+	return nil
 }
 
-func (r *bookRepository) Get(ctx context.Context, id string) (*model.Book, error) {
+func (r *BookRepository) Get(ctx context.Context, id string) (*model.Book, error) {
 	res, err := r.client.Get().
 		Index(r.index).
 		Id(id).
 		Do(ctx)
 	if elastic.IsNotFound(err) {
-		return nil, ErrNotFound
+		return nil, service.ErrNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get book: %w", err)
 	}
 
 	var book model.Book
 	if err := unmarshalSource(res.Source, &book); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode book: %w", err)
 	}
 	book.ID = res.Id
 	return &book, nil
 }
 
-func (r *bookRepository) Delete(ctx context.Context, id string) error {
+func (r *BookRepository) Delete(ctx context.Context, id string) error {
 	_, err := r.client.Delete().
 		Index(r.index).
 		Id(id).
 		Do(ctx)
 	if elastic.IsNotFound(err) {
-		return ErrNotFound
+		return service.ErrNotFound
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("delete book: %w", err)
+	}
+	return nil
 }
 
-func (r *bookRepository) Search(ctx context.Context, params SearchParams) ([]model.Book, int64, error) {
+func (r *BookRepository) Search(ctx context.Context, params service.SearchParams) ([]model.Book, int64, error) {
 	query := buildQuery(params)
 
 	res, err := r.client.Search().
@@ -112,14 +99,14 @@ func (r *bookRepository) Search(ctx context.Context, params SearchParams) ([]mod
 		Query(query).
 		Do(ctx)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("search books: %w", err)
 	}
 
 	books := make([]model.Book, 0, len(res.Hits.Hits))
 	for _, hit := range res.Hits.Hits {
 		var book model.Book
 		if err := unmarshalSource(hit.Source, &book); err != nil {
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("decode search hit: %w", err)
 		}
 		book.ID = hit.Id
 		books = append(books, book)
@@ -128,17 +115,17 @@ func (r *bookRepository) Search(ctx context.Context, params SearchParams) ([]mod
 	return books, totalHits(res), nil
 }
 
-func buildQuery(params SearchParams) elastic.Query {
+func buildQuery(params service.SearchParams) elastic.Query {
 	query := elastic.NewBoolQuery()
 
 	if params.Title != "" {
-		query = query.Must(elastic.NewMatchQuery("title", params.Title))
+		query = query.Must(elastic.NewMatchQuery(fieldTitle, params.Title))
 	}
 	if params.AuthorName != "" {
-		query = query.Must(elastic.NewMatchQuery("author_name", params.AuthorName))
+		query = query.Must(elastic.NewMatchQuery(fieldAuthorName, params.AuthorName))
 	}
 	if params.PriceMin != nil || params.PriceMax != nil {
-		rangeQuery := elastic.NewRangeQuery("price")
+		rangeQuery := elastic.NewRangeQuery(fieldPrice)
 		if params.PriceMin != nil {
 			rangeQuery = rangeQuery.Gte(*params.PriceMin)
 		}
@@ -151,16 +138,16 @@ func buildQuery(params SearchParams) elastic.Query {
 	return query
 }
 
-func (r *bookRepository) Store(ctx context.Context) (StoreStats, error) {
+func (r *BookRepository) Store(ctx context.Context) (service.StoreStats, error) {
 	const distinctAuthorsAgg = "distinct_authors"
 
 	res, err := r.client.Search().
 		Index(r.index).
 		Size(0).
-		Aggregation(distinctAuthorsAgg, elastic.NewCardinalityAggregation().Field("author_name.keyword")).
+		Aggregation(distinctAuthorsAgg, elastic.NewCardinalityAggregation().Field(fieldAuthorKeyword)).
 		Do(ctx)
 	if err != nil {
-		return StoreStats{}, err
+		return service.StoreStats{}, fmt.Errorf("aggregate store stats: %w", err)
 	}
 
 	cardinality, _ := res.Aggregations.Cardinality(distinctAuthorsAgg)
@@ -169,7 +156,7 @@ func (r *bookRepository) Store(ctx context.Context) (StoreStats, error) {
 		distinctAuthors = int64(*cardinality.Value)
 	}
 
-	return StoreStats{
+	return service.StoreStats{
 		TotalBooks:      totalHits(res),
 		DistinctAuthors: distinctAuthors,
 	}, nil

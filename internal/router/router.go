@@ -3,11 +3,14 @@ package router
 import (
 	"github.com/fiverr/book_service_/internal/handler"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/dig"
 )
 
 // Dependencies bundles every handler and middleware the router needs to
-// register its routes.
+// register its routes. The dig container fills it in from its providers.
 type Dependencies struct {
+	dig.In
+
 	Books    *handler.BooksHandler
 	Search   *handler.SearchHandler
 	Store    *handler.StoreHandler
@@ -22,8 +25,7 @@ func New(deps Dependencies) *gin.Engine {
 
 	r.GET("/activity", deps.Activity.Get)
 
-	tracked := r.Group("/")
-	tracked.Use(deps.ActivityMiddleware)
+	tracked := r.Group("", deps.ActivityMiddleware)
 	{
 		books := tracked.Group("/books")
 		{

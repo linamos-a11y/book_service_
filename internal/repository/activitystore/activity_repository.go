@@ -1,4 +1,4 @@
-package redis
+package activitystore
 
 import (
 	"context"
@@ -15,37 +15,34 @@ const (
 )
 
 // ActivityRepository is the only layer that talks to Redis on behalf of the
-// per-user activity log.
-type ActivityRepository interface {
-	RecordAction(ctx context.Context, username, action string) error
-	GetActions(ctx context.Context, username string) ([]string, error)
-}
-
-type activityRepository struct {
+// per-user activity log. It implements service.ActivityRepository.
+type ActivityRepository struct {
 	client *redis.Client
 }
 
 // NewActivityRepository builds an ActivityRepository backed by the given
 // Redis client.
-func NewActivityRepository(client *redis.Client) ActivityRepository {
-	return &activityRepository{client: client}
+func NewActivityRepository(client *redis.Client) *ActivityRepository {
+	return &ActivityRepository{client: client}
 }
 
-func (r *activityRepository) RecordAction(ctx context.Context, username, action string) error {
+func (r *ActivityRepository) RecordAction(ctx context.Context, username, action string) error {
 	key := activityKey(username)
 
 	pipe := r.client.TxPipeline()
 	pipe.LPush(ctx, key, action)
 	pipe.LTrim(ctx, key, 0, maxActions-1)
 	pipe.Expire(ctx, key, activityTTL)
-	_, err := pipe.Exec(ctx)
-	return err
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("record activity: %w", err)
+	}
+	return nil
 }
 
-func (r *activityRepository) GetActions(ctx context.Context, username string) ([]string, error) {
+func (r *ActivityRepository) GetActions(ctx context.Context, username string) ([]string, error) {
 	actions, err := r.client.LRange(ctx, activityKey(username), 0, maxActions-1).Result()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get activity: %w", err)
 	}
 	return actions, nil
 }

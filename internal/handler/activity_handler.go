@@ -1,32 +1,40 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 
-	"github.com/fiverr/book_service_/internal/service"
+	"github.com/fiverr/go_platform/core/logging"
 	"github.com/gin-gonic/gin"
 )
 
+// ActivityService is the part of the activity use case the handler depends on.
+type ActivityService interface {
+	GetActions(ctx context.Context, username string) ([]string, error)
+}
+
 // ActivityHandler handles GET /activity.
 type ActivityHandler struct {
-	svc service.ActivityService
+	svc    ActivityService
+	logger logging.Logger
 }
 
 // NewActivityHandler builds an ActivityHandler backed by the given
 // ActivityService.
-func NewActivityHandler(svc service.ActivityService) *ActivityHandler {
-	return &ActivityHandler{svc: svc}
+func NewActivityHandler(svc ActivityService, logger logging.Logger) *ActivityHandler {
+	return &ActivityHandler{svc: svc, logger: logger}
 }
 
 func (ctrl *ActivityHandler) Get(c *gin.Context) {
-	username := c.Query("username")
-	if !requireFields(c, requiredField{"username", username}) {
+	var req usernameRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		respondError(c, http.StatusBadRequest, bindErrorText(err))
 		return
 	}
 
-	actions, err := ctrl.svc.GetActions(c.Request.Context(), username)
+	actions, err := ctrl.svc.GetActions(c.Request.Context(), req.Username)
 	if err != nil {
-		respondFromError(c, err)
+		respondFromError(c, ctrl.logger, err)
 		return
 	}
 

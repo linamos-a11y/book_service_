@@ -1,35 +1,45 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 
+	"github.com/fiverr/book_service_/internal/model"
 	"github.com/fiverr/book_service_/internal/service"
+	"github.com/fiverr/go_platform/core/logging"
 	"github.com/gin-gonic/gin"
 )
 
+// SearchService is the search use case the handler depends on.
+type SearchService interface {
+	Search(ctx context.Context, input service.SearchInput) (books []model.Book, total int64, err error)
+}
+
 // SearchHandler handles GET /search.
 type SearchHandler struct {
-	svc service.SearchService
+	svc    SearchService
+	logger logging.Logger
 }
 
 // NewSearchHandler builds a SearchHandler backed by the given SearchService.
-func NewSearchHandler(svc service.SearchService) *SearchHandler {
-	return &SearchHandler{svc: svc}
+func NewSearchHandler(svc SearchService, logger logging.Logger) *SearchHandler {
+	return &SearchHandler{svc: svc, logger: logger}
 }
 
 func (ctrl *SearchHandler) Search(c *gin.Context) {
-	username := c.Query("username")
-	if !requireFields(c, requiredField{"username", username}) {
+	var req searchRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		respondError(c, http.StatusBadRequest, bindErrorText(err))
 		return
 	}
 
 	books, total, err := ctrl.svc.Search(c.Request.Context(), service.SearchInput{
-		Title:      c.Query("title"),
-		AuthorName: c.Query("author_name"),
-		PriceRange: c.Query("price_range"),
+		Title:      req.Title,
+		AuthorName: req.AuthorName,
+		PriceRange: req.PriceRange,
 	})
 	if err != nil {
-		respondFromError(c, err)
+		respondFromError(c, ctrl.logger, err)
 		return
 	}
 
