@@ -1,0 +1,21 @@
+# get_env_or_default
+# get_env
+# environment variables
+
+# default: development
+environment: GO_ENV
+
+# default: ./config.yml
+config_file: GO_CONFIG
+
+{{ get_env "GO_ENV" }}:
+  server:
+    addr: {{ get_env_or_default "BOOK_SERVICE_ADDR" ":8080" }}
+  redis:
+    default:
+      host: {{ get_env "GENERAL_REDIS_SEARCH_HOST" }}
+      port: {{ get_env "GENERAL_REDIS_SEARCH_PORT" }}
+  elastic:
+    default:
+      url: http://{{ get_env "GENERAL_ELASTICSEARCH_ES_SEARCH_7_HOST" }}:{{ get_env "GENERAL_ELASTICSEARCH_ES_SEARCH_7_PORT" }}
+      index: books_lin
